@@ -1,0 +1,183 @@
+import SampleData
+import numpy as np
+import random
+
+sampleDataLogic = SampleData.SampleDataLogic()
+masterVolumeNode = sampleDataLogic.downloadSample('MRHead')
+
+volumeNode = arrayFromVolume(getNode('MRHead'))
+p = np.shape(volumeNode)[0]
+q = np.shape(volumeNode)[1]
+r = np.shape(volumeNode)[2]
+volumeNode = getNode('MRHead')
+point_Ijk = [r,q,p]
+volumeIjkToRas = vtk.vtkMatrix4x4()
+volumeNode.GetIJKToRASMatrix(volumeIjkToRas)
+point_VolumeRas = [0, 0, 0, 1]
+volumeIjkToRas.MultiplyPoint(np.append(point_Ijk,1.0), point_VolumeRas)
+transformVolumeRasToRas = vtk.vtkGeneralTransform()
+slicer.vtkMRMLTransformNode.GetTransformBetweenNodes(volumeNode.GetParentTransformNode(), None, transformVolumeRasToRas)
+point_Ras = transformVolumeRasToRas.TransformPoint(point_VolumeRas[0:3])
+pqr_ras = []
+for i in point_Ras:
+	if i<0:
+		pqr_ras.append(-1*i)
+	else:
+		pqr_ras.append(i)
+
+roiNode = slicer.mrmlScene.AddNode(slicer.vtkMRMLAnnotationROINode())
+roiNode.SetRadiusXYZ(pqr_ras[0], pqr_ras[1], pqr_ras[2]/2)
+roiNode.SetXYZ(0,0,pqr_ras[2]/4)
+
+cropVolumeLogic = slicer.modules.cropvolume.logic()
+cropVolumeParameterNode = slicer.vtkMRMLCropVolumeParametersNode()
+cropVolumeParameterNode.SetROINodeID(roiNode.GetID())
+cropVolumeParameterNode.SetInputVolumeNodeID(volumeNode.GetID())
+cropVolumeParameterNode.SetVoxelBased(True)
+cropVolumeLogic.Apply(cropVolumeParameterNode)
+croppedVolume = slicer.mrmlScene.GetNodeByID(cropVolumeParameterNode.GetOutputVolumeNodeID())
+
+masterVolumeNode = getNode('MRHead cropped')
+segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode")
+segmentationNode.CreateDefaultDisplayNodes()
+segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(masterVolumeNode)
+segmentEditorWidget = slicer.qMRMLSegmentEditorWidget()
+segmentEditorWidget.setMRMLScene(slicer.mrmlScene)
+segmentEditorNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentEditorNode")
+segmentEditorWidget.setMRMLSegmentEditorNode(segmentEditorNode)
+segmentEditorWidget.setSegmentationNode(segmentationNode)
+segmentEditorWidget.setMasterVolumeNode(masterVolumeNode)
+
+segmentName = "Skull"
+thresholdMin = 20
+thresholdMax = 279
+
+addedSegmentID = segmentationNode.GetSegmentation().AddEmptySegment(segmentName)
+segmentEditorNode.SetSelectedSegmentID(addedSegmentID)
+segmentEditorWidget.setActiveEffectByName("Threshold")
+effect = segmentEditorWidget.activeEffect()
+effect.setParameter("MinimumThreshold",str(thresholdMin))
+effect.setParameter("MaximumThreshold",str(thresholdMax))
+effect.self().onApply()
+
+segmentEditorWidget.setActiveEffectByName("Islands")
+effect = segmentEditorWidget.activeEffect()
+effect.setParameter("MinimumSize","1000")
+effect.setParameter("Operation","KEEP_LARGEST_ISLAND")
+segmentEditorNode.SetOverwriteMode(slicer.vtkMRMLSegmentEditorNode.OverwriteNone)
+effect.self().onApply()
+
+segmentEditorWidget = None
+slicer.mrmlScene.RemoveNode(segmentEditorNode)
+
+getNode('Segmentation').CreateClosedSurfaceRepresentation()
+
+segmentationNode = getNode("Segmentation")
+labelmapVolumeNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode")
+slicer.modules.segmentations.logic().ExportAllSegmentsToLabelmapNode(segmentationNode, labelmapVolumeNode, slicer.vtkSegmentation.EXTENT_REFERENCE_GEOMETRY)
+
+segmentationNode = getNode("Segmentation")
+
+# Export segments to models
+shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+exportFolderItemId = shNode.CreateFolderItem(shNode.GetSceneItemID(), "Skull")
+slicer.modules.segmentations.logic().ExportAllSegmentsToModels(segmentationNode, exportFolderItemId)
+segmentModels = vtk.vtkCollection()
+shNode.GetDataNodesInBranch(exportFolderItemId, segmentModels)
+# Get exported model of first segment
+modelNode = segmentModels.GetItemAsObject(0)
+slicer.util.saveNode(modelNode, "c:/tmp/Skull.stl")
+
+a = arrayFromVolume(getNode('LabelMapVolume'))
+
+p = np.shape(a)[0]
+q = np.shape(a)[1]
+r = np.shape(a)[2]
+
+d1 = p//18
+d2 = r//18
+x1 = 6*d1
+x2 = 12*d1
+y1 = 6*d2
+y2 = 12*d2
+cloth = np.zeros((p,r))
+index = np.zeros((p,r))
+ind_count = 0
+
+for i in range(x1,x2+1,d1):
+	cloth[i-1][y1-1]=1
+	cloth[i-1][y2-1]=1
+
+for j in range(y1,y2+1,d2):
+	cloth[x1-1][j-1]=1
+	cloth[x2-1][j-1]=1
+	if j<=(y1+3*d2):
+		cloth[x1+3*d1-1][j-1]=1
+
+
+point_count = np.count_nonzero(cloth)
+
+for j in range(y1+3*d2,y1-1,-1):
+	if cloth[x1+3*d1-1][j-1]==1:
+		index[x1+3*d1-1][j-1]=ind_count
+		ind_count+=1
+
+for i in range(x1+4*d1,x2+1,d1):
+	index[i-1][y1-1]=ind_count
+	ind_count+=1
+
+for j in range(y1+d2,y2+1,d2):
+	index[x2-1][j-1] = ind_count
+	ind_count+=1
+
+for i in range(x2-d1,x1-1,-1*d1):
+	index[i-1][y2-1]=ind_count
+	ind_count+=1
+
+for j in range(y2-d2,y1-1,-1*d2):
+	index[x1-1][j-1] = ind_count
+	ind_count+=1
+
+for i in range(x1+d1,x1+2*d1+1,d1):
+	index[i-1][y1-1]=ind_count
+	ind_count+=1
+
+list = np.zeros((point_count,3))
+for j in range(q):
+	slice = a[:,j] #2D slice at that Y coordinate
+	b = np.minimum(slice,cloth) #Minimum achieves the same function as Logical And
+	cloth = np.subtract(cloth,b) #Removing the points that have already been marked
+	for i in range(p):
+		for k in range(r):
+			if b[i][k]==1:
+				x = int(index[i][k])
+				list[x] = [k,j,i] #Append points to a list
+
+
+volumeNode = getNode('LabelMapVolume')
+
+pointListNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode", 'F')
+pointListNode = getNode('F')
+points = list
+for point_Ijk in points:
+	volumeIjkToRas = vtk.vtkMatrix4x4()
+	volumeNode.GetIJKToRASMatrix(volumeIjkToRas)
+	point_VolumeRas = [0, 0, 0, 1]
+	volumeIjkToRas.MultiplyPoint(np.append(point_Ijk,1.0), point_VolumeRas)
+	transformVolumeRasToRas = vtk.vtkGeneralTransform()
+	slicer.vtkMRMLTransformNode.GetTransformBetweenNodes(volumeNode.GetParentTransformNode(), None, transformVolumeRasToRas)
+	point_Ras = transformVolumeRasToRas.TransformPoint(point_VolumeRas[0:3])
+	pointListNode.AddControlPoint((point_Ras[0], point_Ras[1], point_Ras[2]))
+
+
+markup = getNode('F')
+glyph = vtk.vtkSphereSource()
+glyph.SetRadius(3.0)
+glypher = vtk.vtkGlyph3D()
+glypher.SetSourceConnection(glyph.GetOutputPort())
+glypher.SetInputConnection(markup.GetCurveWorldConnection())
+model = slicer.modules.models.logic().AddModel(glypher.GetOutputPort())
+slicer.util.saveNode(model, "c:/tmp/points.stl")
+
+
+

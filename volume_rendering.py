@@ -1,0 +1,7 @@
+cropVolumeLogic = slicer.modules.cropvolume.logic()
+cropVolumeParameterNode = slicer.vtkMRMLCropVolumeParametersNode()
+cropVolumeParameterNode.SetROINodeID(roiNode.GetID())
+cropVolumeParameterNode.SetInputVolumeNodeID(volumeNode.GetID())
+cropVolumeParameterNode.SetVoxelBased(True)
+cropVolumeLogic.Apply(cropVolumeParameterNode)
+croppedVolume = slicer.mrmlScene.GetNodeByID(cropVolumeParameterNode.GetOutputVolumeNodeID())

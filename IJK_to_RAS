@@ -1,0 +1,16 @@
+import random
+volumeNode = getNode('LabelMapVolume')
+
+pointListNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode", 'F')
+pointListNode = getNode('F')
+points = list
+for point_Ijk in points:
+	volumeIjkToRas = vtk.vtkMatrix4x4()
+	volumeNode.GetIJKToRASMatrix(volumeIjkToRas)
+	point_VolumeRas = [0, 0, 0, 1]
+	volumeIjkToRas.MultiplyPoint(np.append(point_Ijk,1.0), point_VolumeRas)
+	transformVolumeRasToRas = vtk.vtkGeneralTransform()
+	slicer.vtkMRMLTransformNode.GetTransformBetweenNodes(volumeNode.GetParentTransformNode(), None, transformVolumeRasToRas)
+	point_Ras = transformVolumeRasToRas.TransformPoint(point_VolumeRas[0:3])
+	pointListNode.AddControlPoint((point_Ras[0], point_Ras[1], point_Ras[2]))
+
