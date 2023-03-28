@@ -11,3 +11,5 @@ neurosurgery on co-dependent platforms.
 
 ● Validate comparative human acquired registration proficiency and improvements on a
 VR platform compared to a 2D medium.
+
+#Slicer 3D
